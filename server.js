@@ -8,6 +8,7 @@ const connectDB = require('./config/database');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
+const Stripe = require('stripe');
 
 // Import des routes
 const authRoutes = require('./routes/auth');
@@ -15,11 +16,49 @@ const userRoutes = require('./routes/users');
 const productRoutes = require('./routes/products');
 const orderRoutes = require('./routes/orders');
 const adminRoutes = require('./routes/admin');
+const paymentRoutes = require('./routes/payments');
 
 const app = express();
 
 // Connexion à la base de données
 connectDB();
+
+// Configuration Stripe
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+// IMPORTANT: Déclarer le webhook Stripe AVANT express.json pour conserver le body brut
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, stripeWebhookSecret);
+  } catch (err) {
+    console.error('[Stripe Webhook] Signature invalide:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        // TODO: marquer la commande comme payée en utilisant payment_intent.id
+        break;
+      case 'payment_intent.payment_failed':
+        // TODO: marquer la commande comme échouée
+        break;
+      case 'charge.refunded':
+        // TODO: enregistrer le remboursement sur la commande
+        break;
+      default:
+        // Autres événements non gérés explicitement
+        break;
+    }
+    res.json({ received: true });
+  } catch (err) {
+    console.error('[Stripe Webhook] Erreur de traitement:', err);
+    res.status(500).json({ message: 'Erreur interne lors du traitement du webhook' });
+  }
+});
 
 // Middleware de base
 app.use(helmet());
@@ -57,6 +96,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Routes de base
 app.get('/', (req, res) => {
