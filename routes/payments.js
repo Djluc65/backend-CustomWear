@@ -13,7 +13,8 @@ router.post('/create-checkout-session', optionalAuth, async (req, res) => {
     const {
       items = [], // [{ name, amount, quantity, currency, image }]
       customerEmail = null,
-      metadata = {}
+      metadata = {},
+      shippingFeeCents = 0
     } = req.body || {};
 
     if (!Array.isArray(items) || items.length === 0) {
@@ -38,6 +39,18 @@ router.post('/create-checkout-session', optionalAuth, async (req, res) => {
       },
       quantity: Number(item.quantity) || 1
     }));
+
+    // Ajouter la ligne de livraison si fournie (> 0)
+    if (Number(shippingFeeCents) > 0) {
+      lineItems.push({
+        price_data: {
+          currency: 'EUR',
+          product_data: { name: 'Livraison' },
+          unit_amount: Math.round(Number(shippingFeeCents))
+        },
+        quantity: 1
+      });
+    }
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',

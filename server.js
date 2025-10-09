@@ -17,6 +17,7 @@ const productRoutes = require('./routes/products');
 const orderRoutes = require('./routes/orders');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payments');
+const paypalRoutes = require('./routes/paypalRoutes');
 
 const app = express();
 
@@ -97,6 +98,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/paypal', paypalRoutes);
 
 // Routes de base
 app.get('/', (req, res) => {
