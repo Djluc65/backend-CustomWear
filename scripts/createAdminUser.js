@@ -10,11 +10,12 @@ const createAdminUser = async () => {
     console.log('✅ Connexion à MongoDB réussie');
 
     // Données de l'utilisateur admin
+    const adminPassword = process.env.ADMIN_PASSWORD || require('crypto').randomBytes(16).toString('hex');
     const adminData = {
       firstName: 'Admin',
       lastName: 'CustomWear',
       email: 'admin@customwear.com',
-      password: 'admin123456', // Sera hashé automatiquement
+      password: adminPassword, // Sera hashé automatiquement
       role: 'admin',
       isActive: true,
       isEmailVerified: true
@@ -43,8 +44,11 @@ const createAdminUser = async () => {
     console.log('🔐 Informations de connexion :');
     console.log('   Pseudo: Admin (ou admin)');
     console.log('   Email: admin@customwear.com');
-    console.log('   Mot de passe: admin123456');
+    console.log('   Mot de passe: <masqué>');
     console.log('   Rôle: admin');
+    if (!process.env.ADMIN_PASSWORD) {
+      console.log('   Note: Un mot de passe aléatoire a été généré. Définissez ADMIN_PASSWORD dans .env pour contrôler la valeur.');
+    }
 
   } catch (error) {
     console.error('❌ Erreur lors de la création de l\'utilisateur admin:', error);
@@ -63,11 +67,12 @@ const createModeratorUser = async () => {
     await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/customwear');
 
     // Données du modérateur
+    const moderatorPassword = process.env.MODERATOR_PASSWORD || require('crypto').randomBytes(16).toString('hex');
     const moderatorData = {
       firstName: 'Moderator',
       lastName: 'CustomWear',
       email: 'moderator@customwear.com',
-      password: 'moderator123456',
+      password: moderatorPassword,
       role: 'moderator',
       isActive: true,
       isEmailVerified: true
@@ -92,8 +97,11 @@ const createModeratorUser = async () => {
     console.log('🔐 Informations de connexion :');
     console.log('   Pseudo: Moderator (ou moderator)');
     console.log('   Email: moderator@customwear.com');
-    console.log('   Mot de passe: moderator123456');
+    console.log('   Mot de passe: <masqué>');
     console.log('   Rôle: moderator');
+    if (!process.env.MODERATOR_PASSWORD) {
+      console.log('   Note: Un mot de passe aléatoire a été généré. Définissez MODERATOR_PASSWORD dans .env pour contrôler la valeur.');
+    }
 
   } catch (error) {
     console.error('❌ Erreur lors de la création de l\'utilisateur modérateur:', error);

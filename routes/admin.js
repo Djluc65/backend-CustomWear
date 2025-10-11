@@ -439,17 +439,8 @@ router.get('/products', authenticateToken, requireAdmin, async (req, res) => {
 // @access  Private/Admin
 router.post('/products', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    console.log('[ADMIN] POST /products - corps reçu:', {
-      bodyKeys: Object.keys(req.body || {}),
-      preview: {
-        name: req.body?.name,
-        category: req.body?.category,
-        priceType: typeof req.body?.price,
-        sku: req.body?.sku
-      },
-      imagesCount: Array.isArray(req.body?.images) ? req.body.images.length : 0,
-      userId: req.user?._id
-    });
+    // Log minimal et non sensible
+    console.log('[ADMIN] POST /products');
     const {
       name,
       description,
@@ -606,11 +597,8 @@ router.post('/products', authenticateToken, requireAdmin, async (req, res) => {
 // @access  Private/Admin
 router.put('/products/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    console.log('[ADMIN] PUT /products/:id - mise à jour demandée', {
-      id: req.params.id,
-      userId: req.user?._id,
-      bodyKeys: Object.keys(req.body || {})
-    });
+    // Log minimal et non sensible
+    console.log('[ADMIN] PUT /products/:id', { id: req.params.id });
     const {
       name,
       description,

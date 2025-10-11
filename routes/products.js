@@ -83,14 +83,7 @@ router.get('/', optionalAuth, async (req, res) => {
      Product.countDocuments(filter)
     ]);
 
-    // Incrémenter les vues pour chaque produit
-    if (products.length > 0) {
-      const productIds = products.map(p => p._id);
-      await Product.updateMany(
-        { _id: { $in: productIds } },
-        { $inc: { 'analytics.views': 1 } }
-      );
-    }
+    // Ne pas incrémenter les vues sur la liste pour éviter gonflement artificiel
 
     res.json({
       success: true,
