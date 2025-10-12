@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const https = require('https');
+const { sendEmail } = require('../config/mailer');
 const { 
   generateToken, 
   generateRefreshToken, 
@@ -180,10 +181,20 @@ router.post('/google', async (req, res) => {
       });
     }
 
+    // Vérifier la configuration Google côté serveur
+    const audience = process.env.GOOGLE_CLIENT_ID;
+    if (!audience) {
+      console.warn('[server/auth] GOOGLE_CLIENT_ID manquant dans la configuration serveur');
+      return res.status(500).json({
+        success: false,
+        message: 'Configuration OAuth Google manquante (GOOGLE_CLIENT_ID)'
+      });
+    }
+
     // Vérifier le token Google
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
-      audience: process.env.GOOGLE_CLIENT_ID
+      audience
     });
 
     const payload = ticket.getPayload();
@@ -542,13 +553,27 @@ router.post('/forgot-password', validatePasswordReset, async (req, res) => {
 
     await user.save();
 
-    // Dans une implémentation complète, on enverrait un email ici
-    // Pour le développement, on retourne le token
+    // Construire l'URL de réinitialisation (client)
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+    const resetUrl = `${clientUrl}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
+
+    // Envoyer l'email
+    try {
+      await sendEmail({
+        to: email,
+        subject: 'Réinitialisation de votre mot de passe',
+        text: `Bonjour,\n\nVous avez demandé à réinitialiser votre mot de passe.\nCliquez sur ce lien pour continuer: ${resetUrl}\nCe lien expire dans 10 minutes.\n\nSi vous n'êtes pas à l'origine de cette demande, ignorez cet email.`,
+        html: `<p>Bonjour,</p><p>Vous avez demandé à réinitialiser votre mot de passe.</p><p><a href="${resetUrl}">Réinitialiser votre mot de passe</a></p><p>Ce lien expire dans 10 minutes.</p><p>Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.</p>`
+      });
+    } catch (mailError) {
+      console.error('[Mailer] Erreur envoi email reset:', mailError?.message);
+    }
+
+    // Réponse API
     res.json({
       success: true,
       message: 'Lien de réinitialisation envoyé par email',
-      // En développement seulement
-      ...(process.env.NODE_ENV === 'development' && { resetToken })
+      ...(process.env.NODE_ENV === 'development' && { resetToken, resetUrl })
     });
 
   } catch (error) {
