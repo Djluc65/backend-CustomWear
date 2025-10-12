@@ -351,8 +351,7 @@ const productSchema = new mongoose.Schema({
 
 // Index pour améliorer les performances
 productSchema.index({ category: 1, status: 1 });
-productSchema.index({ sku: 1 });
-productSchema.index({ 'seo.slug': 1 });
+// Retirer les index en double: sku et seo.slug ont déjà des contraintes uniques.
 productSchema.index({ featured: 1, status: 1 });
 productSchema.index({ status: 1, createdAt: -1 });
 productSchema.index({ 'price.base': 1 });

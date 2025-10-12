@@ -369,7 +369,7 @@ const orderSchema = new mongoose.Schema({
 });
 
 // Index pour améliorer les performances
-orderSchema.index({ orderNumber: 1 });
+// Retirer l’index en double: orderNumber est déjà unique.
 orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ 'payment.status': 1 });

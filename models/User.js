@@ -153,9 +153,8 @@ const userSchema = new mongoose.Schema({
 });
 
 // Index pour améliorer les performances
-userSchema.index({ email: 1 });
-userSchema.index({ googleId: 1 });
-userSchema.index({ facebookId: 1 });
+// Supprimer les index en double: email possède déjà un index unique via le champ.
+// googleId et facebookId sont indexés si nécessaire côté requêtes sans doublons.
 userSchema.index({ role: 1 });
 userSchema.index({ isActive: 1 });
 

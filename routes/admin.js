@@ -6,12 +6,15 @@ const Product = require('../models/Product');
 const Order = require('../models/Order');
 const Category = require('../models/Category');
 const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
 const cloudinary = require('../config/cloudinary');
 
-// Multer config pour fichiers temporaires
-const upload = multer({ dest: process.env.UPLOAD_PATH || 'uploads/' });
+// Multer: stockage en mémoire pour environnements serverless (Vercel)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE || '5242880', 10) // 5MB par défaut
+  }
+});
 
 // @desc    Obtenir les statistiques du dashboard admin
 // @route   GET /api/admin/stats
@@ -752,23 +755,25 @@ router.post('/uploads', authenticateToken, requireAdmin, upload.array('images', 
 
     const folder = 'customwear/products';
 
+    const uploadBufferToCloudinary = (buffer, options) => new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      });
+      stream.end(buffer);
+    });
+
     const uploads = await Promise.all(files.map(async (file) => {
-      const localPath = file.path;
-      try {
-        const result = await cloudinary.uploader.upload(localPath, {
-          folder,
-          transformation: [
-            { width: 1200, height: 1200, crop: 'limit' },
-            { quality: 'auto' },
-            { fetch_format: 'auto' }
-          ]
-        });
-        console.log('[ADMIN] Upload Cloudinary réussi:', { name: file.originalname, public_id: result.public_id });
-        return { url: result.secure_url, public_id: result.public_id };
-      } finally {
-        // Nettoyer le fichier temporaire
-        fs.promises.unlink(localPath).catch(() => {});
-      }
+      const result = await uploadBufferToCloudinary(file.buffer, {
+        folder,
+        transformation: [
+          { width: 1200, height: 1200, crop: 'limit' },
+          { quality: 'auto' },
+          { fetch_format: 'auto' }
+        ]
+      });
+      console.log('[ADMIN] Upload Cloudinary réussi:', { name: file.originalname, public_id: result.public_id });
+      return { url: result.secure_url, public_id: result.public_id };
     }));
 
     res.status(200).json({
