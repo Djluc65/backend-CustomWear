@@ -7,14 +7,21 @@ const Order = require('../models/Order');
 const Category = require('../models/Category');
 const multer = require('multer');
 const cloudinary = require('../config/cloudinary');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-// Multer: stockage en mémoire pour environnements serverless (Vercel)
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE || '5242880', 10) // 5MB par défaut
-  }
+// Multer stocke directement sur Cloudinary (compatible Vercel)
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => ({
+    folder: 'customwear/products',
+    transformation: [
+      { width: 1200, height: 1200, crop: 'limit' },
+      { quality: 'auto' },
+      { fetch_format: 'auto' }
+    ]
+  })
 });
+const upload = multer({ storage });
 
 // @desc    Obtenir les statistiques du dashboard admin
 // @route   GET /api/admin/stats
@@ -491,7 +498,7 @@ router.post('/products', authenticateToken, requireAdmin, async (req, res) => {
       });
     }
 
-    // Mapper les images en supportant chaînes et objets { url, ... }
+    // Mapper les images en supportant chaînes et objets { url, publicId?, ... }
     const mappedImages = Array.isArray(images)
       ? images
           .map((item, idx) => {
@@ -505,6 +512,7 @@ router.post('/products', authenticateToken, requireAdmin, async (req, res) => {
                 url,
                 alt: item.alt,
                 color: item.color,
+                publicId: item.publicId || item.public_id,
                 isPrimary: idx === 0
               };
             }
@@ -724,6 +732,20 @@ router.delete('/products/:id', authenticateToken, requireAdmin, async (req, res)
       });
     }
     
+    // Supprimer les assets Cloudinary liés (si publicId présent)
+    try {
+      const imagePublicIds = (product.images || [])
+        .map(img => img.publicId)
+        .filter(Boolean);
+      if (imagePublicIds.length) {
+        await Promise.all(
+          imagePublicIds.map(pid => cloudinary.uploader.destroy(pid).catch(() => {}))
+        );
+      }
+    } catch (cleanupErr) {
+      console.warn('[ADMIN] Échec de nettoyage Cloudinary pour le produit:', req.params.id, cleanupErr?.message);
+    }
+
     await Product.findByIdAndDelete(req.params.id);
     
     res.json({
@@ -753,32 +775,20 @@ router.post('/uploads', authenticateToken, requireAdmin, upload.array('images', 
       });
     }
 
-    const folder = 'customwear/products';
-
-    const uploadBufferToCloudinary = (buffer, options) => new Promise((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      });
-      stream.end(buffer);
-    });
-
-    const uploads = await Promise.all(files.map(async (file) => {
-      const result = await uploadBufferToCloudinary(file.buffer, {
-        folder,
-        transformation: [
-          { width: 1200, height: 1200, crop: 'limit' },
-          { quality: 'auto' },
-          { fetch_format: 'auto' }
-        ]
-      });
-      console.log('[ADMIN] Upload Cloudinary réussi:', { name: file.originalname, public_id: result.public_id });
-      return { url: result.secure_url, public_id: result.public_id };
+    // Les fichiers sont déjà uploadés sur Cloudinary par le storage
+    const assets = files.map(file => ({
+      url: file.path,
+      public_id: file.filename || file.public_id
     }));
+    // Les fichiers sont déjà uploadés sur Cloudinary par le storage
+    const assets = files.map(file => ({
+      url: file.path,
+      public_id: file.filename || file.public_id
+    
 
     res.status(200).json({
       success: true,
-      data: { urls: uploads.map(u => u.url), assets: uploads },
+      data: { urls: assets.map(a => a.url), assets },
       message: 'Images uploadées avec succès'
     });
   } catch (error) {

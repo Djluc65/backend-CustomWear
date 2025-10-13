@@ -54,7 +54,11 @@ const productSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     },
-    color: String // Couleur associée à cette image
+    color: String, // Couleur associée à cette image
+    publicId: {
+      type: String,
+      trim: true
+    }
   }],
   price: {
     base: {
