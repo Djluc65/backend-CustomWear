@@ -22,9 +22,17 @@ const paymentRoutes = require('../routes/payments');
 
 // Init app
 const app = express();
+// Activer trust proxy derrière Vercel/CDN
+app.set('trust proxy', true);
 
-// Connexion DB (réutilisable en serverless)
-connectDB();
+// Connexion DB non bloquante (évite les blocages en préflight)
+(async () => {
+  try {
+    await connectDB();
+  } catch (err) {
+    console.error('[DB] Échec de connexion MongoDB:', err?.message || err);
+  }
+})();
 
 // Stripe
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -62,13 +70,24 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res
 // Middlewares
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
+// Préflights CORS explicites
+app.options('*', cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined'));
 
-// Rate limiting
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
-app.use(limiter);
+// Rate limiting (fiable derrière proxy)
+const limiter = rateLimit({ 
+  windowMs: 15 * 60 * 1000, 
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  trustProxy: true
+});
+// Désactiver en environnement Vercel pour éviter l’erreur X-Forwarded-For
+if (!process.env.VERCEL) {
+  app.use(limiter);
+}
 
 // Mount routes (préfixe implicite /api côté Vercel)
 app.use('/auth', authRoutes);
