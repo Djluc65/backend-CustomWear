@@ -1,4 +1,6 @@
 const mongoose = require('mongoose');
+// Désactiver le buffering de commandes pour éviter l'attente indéfinie si la DB n'est pas connectée
+mongoose.set('bufferCommands', false);
 
 const connectDB = async () => {
   try {
