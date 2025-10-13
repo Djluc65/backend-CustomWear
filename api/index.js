@@ -22,9 +22,17 @@ const paymentRoutes = require('../routes/payments');
 
 // Init app
 const app = express();
+// Vercel et autres plateformes mettent X-Forwarded-For: activer trust proxy
+app.set('trust proxy', true);
 
-// Connexion DB (réutilisable en serverless)
-connectDB();
+// Connexion DB (non bloquante pour préflight et health)
+(async () => {
+  try {
+    await connectDB();
+  } catch (err) {
+    console.error('[DB] Échec de connexion MongoDB:', err?.message || err);
+  }
+})();
 
 // Stripe
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -62,12 +70,20 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res
 // Middlewares
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
+// Réponse rapide aux préflights CORS
+app.options('*', cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined'));
 
-// Rate limiting
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+// Rate limiting (fiable derrière proxy/CDN)
+const limiter = rateLimit({ 
+  windowMs: 15 * 60 * 1000, 
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  trustProxy: true
+});
 app.use(limiter);
 
 // Mount routes (préfixe implicite /api côté Vercel)

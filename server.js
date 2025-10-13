@@ -20,6 +20,8 @@ const paymentRoutes = require('./routes/payments');
 const paypalRoutes = require('./routes/paypalRoutes');
 
 const app = express();
+// Derrière proxy/CDN (local reverse proxy ou déploiements), activer trust proxy
+app.set('trust proxy', true);
 
 // Connexion à la base de données
 connectDB();
@@ -63,7 +65,9 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
 
 // Middleware de base
 app.use(helmet());
-app.use(cors());
+app.use(cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
+// Préflights CORS
+app.options('*', cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined'));
@@ -84,10 +88,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate limiting
+// Rate limiting (cohérent derrière proxy)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limite chaque IP à 100 requêtes par windowMs
+  max: 100, // limite chaque IP à 100 requêtes par windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  trustProxy: true
 });
 app.use(limiter);
 

@@ -2,6 +2,11 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
+    // Réutiliser la connexion existante pour éviter les reconnections coûteuses en serverless
+    if (mongoose.connection.readyState >= 1) {
+      return mongoose.connection;
+    }
+
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
@@ -25,7 +30,8 @@ const connectDB = async () => {
     }
   } catch (error) {
     console.error('Erreur de connexion MongoDB:', error.message);
-    process.exit(1);
+    // En environnement serverless, éviter process.exit qui peut provoquer des timeouts
+    throw error;
   }
 };
 
