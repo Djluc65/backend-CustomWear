@@ -780,11 +780,6 @@ router.post('/uploads', authenticateToken, requireAdmin, upload.array('images', 
       url: file.path,
       public_id: file.filename || file.public_id
     }));
-    // Les fichiers sont déjà uploadés sur Cloudinary par le storage
-    const assets = files.map(file => ({
-      url: file.path,
-      public_id: file.filename || file.public_id
-    
 
     res.status(200).json({
       success: true,
