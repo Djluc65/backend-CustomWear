@@ -372,34 +372,47 @@ productSchema.index({
 
 // Virtual pour le prix effectif (avec promotion)
 productSchema.virtual('effectivePrice').get(function() {
-  return this.price.sale || this.price.base;
+  const price = this && this.price ? this.price : {};
+  const sale = typeof price.sale === 'number' ? price.sale : undefined;
+  const base = typeof price.base === 'number' ? price.base : undefined;
+  if (typeof sale === 'number') return sale;
+  if (typeof base === 'number') return base;
+  return 0;
 });
 
 // Virtual pour le pourcentage de réduction
 productSchema.virtual('discountPercentage').get(function() {
-  if (!this.price.sale) return 0;
-  return Math.round(((this.price.base - this.price.sale) / this.price.base) * 100);
+  const price = this && this.price ? this.price : {};
+  const sale = typeof price.sale === 'number' ? price.sale : undefined;
+  const base = typeof price.base === 'number' ? price.base : undefined;
+  if (typeof sale !== 'number' || typeof base !== 'number' || base === 0) return 0;
+  return Math.round(((base - sale) / base) * 100);
 });
 
 // Virtual pour vérifier si le produit est en stock
 productSchema.virtual('inStock').get(function() {
-  return this.variants.some(variant => variant.stock > 0);
+  const variants = Array.isArray(this?.variants) ? this.variants : [];
+  return variants.some(variant => (variant?.stock || 0) > 0);
 });
 
 // Virtual pour le stock total
 productSchema.virtual('totalStock').get(function() {
-  return this.variants.reduce((total, variant) => total + variant.stock, 0);
+  const variants = Array.isArray(this?.variants) ? this.variants : [];
+  return variants.reduce((total, variant) => total + (variant?.stock || 0), 0);
 });
 
 // Virtual pour l'image principale
 productSchema.virtual('primaryImage').get(function() {
-  const primary = this.images.find(img => img.isPrimary);
-  return primary || this.images[0];
+  const images = Array.isArray(this?.images) ? this.images : [];
+  const primary = images.find(img => img?.isPrimary);
+  return primary || images[0] || null;
 });
 
 // Virtual pour vérifier si le produit est nouveau
 productSchema.virtual('isNewProduct').get(function() {
-  return this.isNew && this.newUntil > new Date();
+  const isNew = Boolean(this?.isNew);
+  const newUntil = this?.newUntil instanceof Date ? this.newUntil : (this?.newUntil ? new Date(this.newUntil) : null);
+  return isNew && newUntil && newUntil > new Date();
 });
 
 // Middleware pour générer le slug automatiquement
