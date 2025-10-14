@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Product = require('../models/Product');
 const Category = require('../models/Category');
 const { 
@@ -169,6 +170,13 @@ router.get('/categories', async (req, res) => {
 router.get('/:productId', optionalAuth, async (req, res) => {
   try {
     const { productId } = req.params;
+    // Valider l'ID pour éviter les erreurs de cast et répondre proprement
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Produit non trouvé'
+      });
+    }
     
     const product = await Product.findOne({
       _id: productId,
