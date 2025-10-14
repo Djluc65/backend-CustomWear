@@ -24,12 +24,18 @@ const app = express();
 // Derrière proxy/CDN (Vercel), faire confiance au premier proxy uniquement
 app.set('trust proxy', 1);
 
-// Connexion à la base de données (appel initial non bloquant)
-connectDB();
+// Connexion à la base de données (appel initial non bloquant, avec capture d'erreur)
+connectDB().catch(err => {
+  console.error('Échec initial de connexion à MongoDB:', err?.message || err);
+});
 
 // Middleware pour garantir la connexion DB avant de traiter les requêtes
 app.use(async (req, res, next) => {
   try {
+    // Ne pas forcer la connexion DB pour les préflights CORS ou routes non-API
+    if (req.method === 'OPTIONS' || !req.originalUrl.startsWith('/api')) {
+      return next();
+    }
     if (mongoose.connection.readyState < 1) {
       await connectDB();
     }
