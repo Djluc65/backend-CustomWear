@@ -21,11 +21,24 @@ const paymentRoutes = require('./routes/payments');
 const paypalRoutes = require('./routes/paypalRoutes');
 
 const app = express();
-// Derrière proxy/CDN (local reverse proxy ou déploiements), activer trust proxy
-app.set('trust proxy', true);
+// Derrière proxy/CDN (Vercel), faire confiance au premier proxy uniquement
+app.set('trust proxy', 1);
 
-// Connexion à la base de données
+// Connexion à la base de données (appel initial non bloquant)
 connectDB();
+
+// Middleware pour garantir la connexion DB avant de traiter les requêtes
+app.use(async (req, res, next) => {
+  try {
+    if (mongoose.connection.readyState < 1) {
+      await connectDB();
+    }
+  } catch (err) {
+    console.error('Erreur de connexion DB avant requête:', err?.message || err);
+    return res.status(500).json({ message: 'Erreur de connexion à la base de données' });
+  }
+  next();
+});
 
 // Configuration Stripe
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);

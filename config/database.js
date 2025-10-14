@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
-// Désactiver le buffering de commandes pour éviter l'attente indéfinie si la DB n'est pas connectée
-mongoose.set('bufferCommands', false);
+// Laisser le buffering par défaut activé afin d'éviter les erreurs avant la connexion
+// (Mongoose buffer les opérations pendant l'initialisation de la connexion)
+mongoose.set('bufferCommands', true);
 
 const connectDB = async () => {
   try {
@@ -10,8 +11,6 @@ const connectDB = async () => {
     }
 
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
       serverSelectionTimeoutMS: 15000, // échoue en 15s si le cluster est inaccessible
       connectTimeoutMS: 10000, // limite la tentative de connexion initiale
       socketTimeoutMS: 20000 // évite que les requêtes pendent trop longtemps
