@@ -87,22 +87,58 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
 app.use(compression());
 app.use(helmet());
 // CORS dynamique: autoriser plusieurs origines via ALLOWED_ORIGINS ou CLIENT_URL
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL || '*')
-  .split(',')
-  .map(o => o.trim())
-  .filter(Boolean);
+// Ajout d’un support wildcard (ex: https://*.vercel.app) et VERCEL_URL
+const buildAllowedOrigins = () => {
+  const envOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL || '')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+  const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null;
+  const defaults = [];
+  // En développement, autoriser local par défaut si rien n’est configuré
+  if (!envOrigins.length && (process.env.NODE_ENV || 'development') === 'development') {
+    defaults.push('http://localhost:3000', 'http://localhost:3001', 'http://localhost:5000');
+  }
+  const list = [...envOrigins, ...(vercelUrl ? [vercelUrl] : []), ...defaults];
+  // En production, tolérer les sous-domaines vercel si non configuré explicitement
+  if ((process.env.NODE_ENV || 'production') === 'production') {
+    list.push('https://*.vercel.app');
+  }
+  // Si toujours vide, autoriser tout (évite les 500 sur OPTIONS)
+  if (list.length === 0) list.push('*');
+  return Array.from(new Set(list));
+};
+
+const allowedOrigins = buildAllowedOrigins();
+
+const matchesPattern = (origin, pattern) => {
+  if (pattern === '*') return true;
+  try {
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    const re = new RegExp(`^${escaped}$`);
+    return re.test(origin);
+  } catch {
+    return false;
+  }
+};
+
+const isOriginAllowed = (origin) => {
+  return allowedOrigins.some((p) => matchesPattern(origin, p));
+};
 
 const corsOptions = {
   origin: function(origin, callback) {
     // Autoriser requêtes sans origin (mobile app, curl, etc.)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    if (isOriginAllowed(origin)) {
       return callback(null, true);
     }
     console.warn('[CORS] Origin bloquée:', origin, 'Autorisé:', allowedOrigins);
-    return callback(new Error('Not allowed by CORS'));
+    // Ne pas lever une erreur pour éviter un 500; laisser le navigateur bloquer sans header CORS
+    return callback(null, false);
   },
-  credentials: true
+  credentials: true,
+  optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
 // Préflights CORS
@@ -161,6 +197,10 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Éviter les 404 pour les favicons en environnement backend-only
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+app.get('/favicon.png', (req, res) => res.status(204).end());
 
 // Route de test API
 app.get('/api/health', (req, res) => {
