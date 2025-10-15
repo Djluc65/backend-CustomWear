@@ -24,6 +24,22 @@ const router = express.Router();
 // Configuration Google OAuth
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+// Utilitaires pour audiences Google multiples (déploiements/historique d'IDs)
+const getAllowedGoogleAudiences = () => {
+  const list = [];
+  if (process.env.GOOGLE_CLIENT_ID) list.push(process.env.GOOGLE_CLIENT_ID.trim());
+  if (process.env.GOOGLE_CLIENT_ID_ALT) list.push(process.env.GOOGLE_CLIENT_ID_ALT.trim());
+  if (process.env.GOOGLE_ALLOWED_AUDIENCES) {
+    const extra = process.env.GOOGLE_ALLOWED_AUDIENCES
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    list.push(...extra);
+  }
+  // Supprimer les doublons
+  return Array.from(new Set(list)).filter(Boolean);
+};
+
 // @route   POST /api/auth/register
 // @desc    Inscription d'un nouvel utilisateur
 // @access  Public
@@ -181,21 +197,33 @@ router.post('/google', async (req, res) => {
       });
     }
 
-    // Vérifier la configuration Google côté serveur
-    const audience = process.env.GOOGLE_CLIENT_ID;
-    if (!audience) {
-      console.warn('[server/auth] GOOGLE_CLIENT_ID manquant dans la configuration serveur');
+    // Vérifier la configuration Google côté serveur (audiences multiples supportées)
+    const audiences = getAllowedGoogleAudiences();
+    if (!audiences || audiences.length === 0) {
+      console.warn('[server/auth] Aucune audience Google configurée (GOOGLE_CLIENT_ID/ALT/ALLOWED_AUDIENCES)');
       return res.status(500).json({
         success: false,
         message: 'Configuration OAuth Google manquante (GOOGLE_CLIENT_ID)'
       });
     }
 
-    // Vérifier le token Google
-    const ticket = await googleClient.verifyIdToken({
-      idToken: credential,
-      audience
-    });
+    // Vérifier le token Google (gérer explicitement les erreurs pour diagnostiquer l'audience mismatch)
+    let ticket;
+    try {
+      ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: audiences
+      });
+    } catch (verifyError) {
+      console.error('[server/auth] Google token verification failed', {
+        message: verifyError?.message,
+        audiences
+      });
+      return res.status(401).json({
+        success: false,
+        message: 'Token Google invalide ou non autorisé (audience mismatch)'
+      });
+    }
 
     const payload = ticket.getPayload();
     const { sub: googleId, email, given_name: firstName, family_name: lastName, picture: avatar } = payload;
