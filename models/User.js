@@ -152,6 +152,16 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
+// Liste de souhaits de l'utilisateur (produits aimés)
+// Tableau d'ObjectId référencés vers Product
+// Utiliser $addToSet côté routes pour éviter les doublons
+userSchema.add({
+  wishlist: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product'
+  }]
+});
+
 // Index pour améliorer les performances
 // Supprimer les index en double: email possède déjà un index unique via le champ.
 // googleId et facebookId sont indexés si nécessaire côté requêtes sans doublons.

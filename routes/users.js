@@ -1,5 +1,7 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const User = require('../models/User');
+const Product = require('../models/Product');
 const { 
   authenticateToken, 
   requireAdmin, 
@@ -67,6 +69,120 @@ router.put('/profile', authenticateToken, validateProfileUpdate, async (req, res
 
   } catch (error) {
     console.error('Erreur lors de la mise à jour du profil:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur interne du serveur'
+    });
+  }
+});
+
+// =============================
+// Wishlist (favoris)
+// =============================
+
+// @route   GET /api/users/wishlist
+// @desc    Récupérer la wishlist de l'utilisateur connecté
+// @access  Private
+router.get('/wishlist', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('wishlist')
+      .populate({
+        path: 'wishlist',
+        select: 'name category images price ratings seo'
+      });
+
+    res.json({
+      success: true,
+      data: {
+        wishlist: user?.wishlist || []
+      }
+    });
+  } catch (error) {
+    console.error('Erreur lors de la récupération de la wishlist:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur interne du serveur'
+    });
+  }
+});
+
+// @route   POST /api/users/wishlist/:productId
+// @desc    Ajouter un produit à la wishlist
+// @access  Private
+router.post('/wishlist/:productId', authenticateToken, async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Produit non trouvé'
+      });
+    }
+
+    const product = await Product.findOne({ _id: productId, status: 'active' }).select('_id');
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Produit non trouvé ou inactif'
+      });
+    }
+
+    const user = await User.findById(req.user._id).select('wishlist');
+    const alreadyInWishlist = Array.isArray(user.wishlist) && user.wishlist.some(id => id.toString() === productId);
+
+    await User.updateOne({ _id: req.user._id }, { $addToSet: { wishlist: product._id } });
+
+    if (!alreadyInWishlist) {
+      await Product.updateOne({ _id: product._id }, { $inc: { 'analytics.wishlistAdds': 1 } });
+    }
+
+    res.json({
+      success: true,
+      message: 'Produit ajouté aux favoris',
+      data: { productId }
+    });
+  } catch (error) {
+    console.error('Erreur lors de l\'ajout à la wishlist:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur interne du serveur'
+    });
+  }
+});
+
+// @route   DELETE /api/users/wishlist/:productId
+// @desc    Retirer un produit de la wishlist
+// @access  Private
+router.delete('/wishlist/:productId', authenticateToken, async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Produit non trouvé'
+      });
+    }
+
+    const user = await User.findById(req.user._id).select('wishlist');
+    const wasInWishlist = Array.isArray(user.wishlist) && user.wishlist.some(id => id.toString() === productId);
+
+    await User.updateOne({ _id: req.user._id }, { $pull: { wishlist: productId } });
+
+    if (wasInWishlist) {
+      // Décrémenter l\'analytics uniquement si le produit était présent
+      await Product.updateOne({ _id: productId }, { $inc: { 'analytics.wishlistAdds': -1 } });
+    }
+
+    res.json({
+      success: true,
+      message: 'Produit retiré des favoris',
+      data: { productId }
+    });
+  } catch (error) {
+    console.error('Erreur lors du retrait de la wishlist:', error);
     res.status(500).json({
       success: false,
       message: 'Erreur interne du serveur'

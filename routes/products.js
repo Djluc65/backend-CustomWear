@@ -194,6 +194,13 @@ router.get('/:productId', optionalAuth, async (req, res) => {
     // Incrémenter les vues
     await product.incrementViews();
 
+    // Calculer si l'utilisateur connecté a liké ce produit
+    const likedByUser = !!(req.user && Array.isArray(req.user.wishlist) && req.user.wishlist.some(id => id.toString() === product._id.toString()));
+
+    // Préparer la réponse produit avec le flag likedByUser
+    const productResponse = product.toObject();
+    productResponse.likedByUser = likedByUser;
+
     // Obtenir des produits similaires
     const relatedProducts = await Product.find({
       _id: { $ne: productId },
@@ -206,7 +213,7 @@ router.get('/:productId', optionalAuth, async (req, res) => {
     res.json({
       success: true,
       data: {
-        product,
+        product: productResponse,
         relatedProducts
       }
     });
