@@ -19,6 +19,8 @@ const orderRoutes = require('./routes/orders');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payments');
 const paypalRoutes = require('./routes/paypalRoutes');
+const customizationRoutes = require('./routes/customizations');
+const modelRoutes = require('./routes/models');
 
 const app = express();
 // Derrière proxy/CDN (Vercel), faire confiance au premier proxy uniquement
@@ -181,6 +183,8 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/paypal', paypalRoutes);
+app.use('/api/customizations', customizationRoutes);
+app.use('/api/models', modelRoutes);
 
 // Routes de base
 app.get('/', (req, res) => {

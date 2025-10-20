@@ -76,7 +76,7 @@ const validateLogin = [
 // Validations pour la mise à jour du profil
 const validateProfileUpdate = [
   body('firstName')
-    .optional()
+    .optional({ checkFalsy: true })
     .trim()
     .isLength({ min: 2, max: 50 })
     .withMessage('Le prénom doit contenir entre 2 et 50 caractères')
@@ -84,7 +84,7 @@ const validateProfileUpdate = [
     .withMessage('Le prénom ne peut contenir que des lettres, espaces, tirets et apostrophes'),
   
   body('lastName')
-    .optional()
+    .optional({ checkFalsy: true })
     .trim()
     .isLength({ min: 2, max: 50 })
     .withMessage('Le nom doit contenir entre 2 et 50 caractères')
@@ -92,12 +92,12 @@ const validateProfileUpdate = [
     .withMessage('Le nom ne peut contenir que des lettres, espaces, tirets et apostrophes'),
   
   body('phone')
-    .optional()
-    .matches(/^[\+]?[1-9][\d]{0,15}$/)
+    .optional({ checkFalsy: true })
+    .matches(/^[\+]?([1-9][\d]{0,15})$/)
     .withMessage('Veuillez entrer un numéro de téléphone valide'),
   
   body('dateOfBirth')
-    .optional()
+    .optional({ checkFalsy: true })
     .isISO8601()
     .withMessage('Veuillez entrer une date de naissance valide')
     .custom((value) => {
@@ -112,7 +112,7 @@ const validateProfileUpdate = [
     }),
   
   body('gender')
-    .optional()
+    .optional({ checkFalsy: true })
     .isIn(['homme', 'femme', 'autre', 'non-specifie'])
     .withMessage('Genre invalide'),
   
@@ -208,7 +208,6 @@ const validatePasswordResetConfirm = [
   handleValidationErrors
 ];
 
-// Validations pour les produits
 const validateProduct = [
   body('name')
     .trim()
@@ -243,7 +242,6 @@ const validateProduct = [
   handleValidationErrors
 ];
 
-// Validations pour les commandes
 const validateOrder = [
   body('items')
     .isArray({ min: 1 })

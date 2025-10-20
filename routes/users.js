@@ -11,6 +11,23 @@ const {
   validateProfileUpdate,
   validateAddress
 } = require('../middleware/validation');
+const multer = require('multer');
+const cloudinary = require('../config/cloudinary');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+
+const avatarStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => ({
+    folder: 'customwear/avatars',
+    transformation: [
+      { width: 400, height: 400, crop: 'fill', gravity: 'auto' },
+      { quality: 'auto' },
+      { fetch_format: 'auto' }
+    ],
+    public_id: `user_${req.user._id}_${Date.now()}`
+  })
+});
+const avatarUpload = multer({ storage: avatarStorage });
 
 const router = express.Router();
 
@@ -69,6 +86,40 @@ router.put('/profile', authenticateToken, validateProfileUpdate, async (req, res
 
   } catch (error) {
     console.error('Erreur lors de la mise à jour du profil:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur interne du serveur'
+    });
+  }
+});
+
+// @route   PUT /api/users/profile/avatar
+// @desc    Mettre à jour l'avatar utilisateur
+// @access  Private
+router.put('/profile/avatar', authenticateToken, avatarUpload.single('avatar'), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Aucune image fournie'
+      });
+    }
+
+    const user = req.user;
+    user.avatar = file.path;
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Avatar mis à jour avec succès',
+      data: {
+        user: user.getPublicProfile()
+      }
+    });
+  } catch (error) {
+    console.error('Erreur lors de la mise à jour de l\'avatar:', error);
     res.status(500).json({
       success: false,
       message: 'Erreur interne du serveur'
