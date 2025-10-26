@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 
+const ALLOWED_GENDERS = ['unisexe', 'homme', 'femme', 'enfant'];
+
 const productSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -21,7 +23,13 @@ const productSchema = new mongoose.Schema({
   category: {
     type: String,
     required: [true, 'La catégorie est requise'],
-    enum: ['t-shirts', 'vestes', 'casquettes', 'vaisselle'],
+    enum: ['t-shirts', 'vestes', 'casquettes', 'bonnets', 'vaisselle'],
+    lowercase: true
+  },
+  gender: {
+    type: String,
+    enum: ALLOWED_GENDERS,
+    default: 'unisexe',
     lowercase: true
   },
   subcategory: {
@@ -54,7 +62,12 @@ const productSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     },
-    color: String, // Couleur associée à cette image
+    color: String,
+    side: {
+      type: String,
+      enum: ['front', 'back'],
+      lowercase: true
+    },
     publicId: {
       type: String,
       trim: true
@@ -82,11 +95,12 @@ const productSchema = new mongoose.Schema({
       default: 'EUR'
     }
   },
+  sizes: [{ type: String, enum: ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', 'Unique'] }],
   variants: [{
     size: {
       type: String,
       required: true,
-      enum: ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'Unique']
+      enum: ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', 'XXL', 'XXXL', 'Unique']
     },
     color: {
       name: {
@@ -289,7 +303,11 @@ const productSchema = new mongoose.Schema({
   },
   newUntil: {
     type: Date,
-    default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 jours
+    default: function() {
+      const date = new Date(this.createdAt || Date.now());
+      date.setDate(date.getDate() + 30);
+      return date;
+    }
   },
   shipping: {
     weight: {
@@ -353,16 +371,14 @@ const productSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Index pour améliorer les performances
 productSchema.index({ category: 1, status: 1 });
-// Retirer les index en double: sku et seo.slug ont déjà des contraintes uniques.
 productSchema.index({ featured: 1, status: 1 });
 productSchema.index({ status: 1, createdAt: -1 });
 productSchema.index({ 'price.base': 1 });
 productSchema.index({ 'ratings.average': -1 });
 productSchema.index({ tags: 1 });
+productSchema.index({ gender: 1 });
 
-// Index de recherche textuelle
 productSchema.index({
   name: 'text',
   description: 'text',
@@ -370,194 +386,123 @@ productSchema.index({
   tags: 'text'
 });
 
-// Virtual pour le prix effectif (avec promotion)
 productSchema.virtual('effectivePrice').get(function() {
-  const price = this && this.price ? this.price : {};
-  const sale = typeof price.sale === 'number' ? price.sale : undefined;
-  const base = typeof price.base === 'number' ? price.base : undefined;
-  if (typeof sale === 'number') return sale;
-  if (typeof base === 'number') return base;
-  return 0;
+  return typeof this.price?.sale === 'number' && this.price.sale > 0 && this.price.sale < this.price.base
+    ? this.price.sale
+    : this.price.base;
 });
 
-// Virtual pour le pourcentage de réduction
 productSchema.virtual('discountPercentage').get(function() {
-  const price = this && this.price ? this.price : {};
-  const sale = typeof price.sale === 'number' ? price.sale : undefined;
-  const base = typeof price.base === 'number' ? price.base : undefined;
-  if (typeof sale !== 'number' || typeof base !== 'number' || base === 0) return 0;
-  return Math.round(((base - sale) / base) * 100);
+  if (typeof this.price?.sale !== 'number' || this.price.sale <= 0) return 0;
+  return Math.round((1 - (this.price.sale / this.price.base)) * 100);
 });
 
-// Virtual pour vérifier si le produit est en stock
 productSchema.virtual('inStock').get(function() {
-  const variants = Array.isArray(this?.variants) ? this.variants : [];
-  return variants.some(variant => (variant?.stock || 0) > 0);
+  return (Array.isArray(this.variants) && this.variants.some(v => (v.stock || 0) > 0)) || false;
 });
 
-// Virtual pour le stock total
 productSchema.virtual('totalStock').get(function() {
-  const variants = Array.isArray(this?.variants) ? this.variants : [];
-  return variants.reduce((total, variant) => total + (variant?.stock || 0), 0);
+  return Array.isArray(this.variants) ? this.variants.reduce((acc, v) => acc + (v.stock || 0), 0) : 0;
 });
 
-// Virtual pour l'image principale
 productSchema.virtual('primaryImage').get(function() {
-  const images = Array.isArray(this?.images) ? this.images : [];
-  const primary = images.find(img => img?.isPrimary);
-  return primary || images[0] || null;
+  const primary = Array.isArray(this.images) ? this.images.find(i => i.isPrimary) : null;
+  return primary || (Array.isArray(this.images) ? this.images[0] : null) || null;
 });
 
-// Virtual pour vérifier si le produit est nouveau
 productSchema.virtual('isNewProduct').get(function() {
-  const isNew = Boolean(this?.isNew);
-  const newUntil = this?.newUntil instanceof Date ? this.newUntil : (this?.newUntil ? new Date(this.newUntil) : null);
-  return isNew && newUntil && newUntil > new Date();
+  const now = new Date();
+  return this.isNew && this.newUntil && this.newUntil > now;
 });
 
-// Middleware pour générer le slug automatiquement
 productSchema.pre('save', function(next) {
-  if (this.isModified('name') && !this.seo.slug) {
-    this.seo.slug = this.name
+  if (this.isModified('name')) {
+    const baseSlug = (this.name || '').toString()
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
+    this.seo = this.seo || {};
+    this.seo.slug = baseSlug;
   }
   next();
 });
 
-// Middleware pour s'assurer qu'une seule image principale existe
 productSchema.pre('save', function(next) {
-  if (this.images && this.images.length > 0) {
-    const primaryImages = this.images.filter(img => img.isPrimary);
-    if (primaryImages.length > 1) {
-      // Garder seulement la première comme principale
-      this.images.forEach((img, index) => {
-        img.isPrimary = index === 0;
-      });
-    } else if (primaryImages.length === 0) {
-      // Si aucune image principale, définir la première
-      this.images[0].isPrimary = true;
+  if (this.isModified('gender') && this.gender) {
+    this.gender = this.gender.toLowerCase();
+    if (!ALLOWED_GENDERS.includes(this.gender)) {
+      return next(new Error(`Genre invalide. Autorisés: ${ALLOWED_GENDERS.join(', ')}`));
     }
   }
   next();
 });
 
-// Middleware pour mettre à jour lastModifiedBy
 productSchema.pre('save', function(next) {
-  if (this.isModified() && !this.isNew) {
-    this.lastModifiedBy = this.modifiedBy || this.lastModifiedBy;
+  if (this.isModified('price') && this.price?.sale && this.price?.base && this.price.sale >= this.price.base) {
+    return next(new Error('Le prix de vente doit être inférieur au prix de base'));
   }
   next();
 });
 
-// Méthode pour obtenir les variantes disponibles
 productSchema.methods.getAvailableVariants = function() {
-  return this.variants.filter(variant => variant.stock > 0);
+  return (Array.isArray(this.variants) ? this.variants.filter(v => (v.stock || 0) > 0) : []);
 };
 
-// Méthode pour obtenir le prix avec personnalisation
 productSchema.methods.getCustomizationPrice = function(customizations = {}) {
-  let basePrice = this.effectivePrice;
-  let customizationPrice = 0;
-
-  if (customizations.text && this.customization.options.text.enabled) {
-    // Prix pour le texte (position, couleur, police)
-    if (customizations.text.position) {
-      const position = this.customization.options.text.positions.find(p => p.name === customizations.text.position);
-      if (position) customizationPrice += position.price;
-    }
-    if (customizations.text.color) {
-      const color = this.customization.options.text.colors.find(c => c.name === customizations.text.color);
-      if (color) customizationPrice += color.price;
-    }
-    if (customizations.text.font) {
-      const font = this.customization.options.text.fonts.find(f => f.name === customizations.text.font);
-      if (font) customizationPrice += font.price;
-    }
+  const options = this.customization?.options || {};
+  let price = 0;
+  if (options.text?.enabled && customizations.text) {
+    price += options.text.basePrice || 0;
   }
-
-  if (customizations.image && this.customization.options.image.enabled) {
-    customizationPrice += this.customization.options.image.basePrice;
-    if (customizations.image.position) {
-      const position = this.customization.options.image.positions.find(p => p.name === customizations.image.position);
-      if (position) customizationPrice += position.price;
-    }
+  if (options.image?.enabled && customizations.image) {
+    price += options.image.basePrice || 0;
   }
-
-  if (customizations.embroidery && this.customization.options.embroidery.enabled) {
-    customizationPrice += this.customization.options.embroidery.basePrice;
-    if (customizations.embroidery.stitches) {
-      customizationPrice += customizations.embroidery.stitches * this.customization.options.embroidery.pricePerStitch;
-    }
+  if (options.embroidery?.enabled && customizations.embroidery) {
+    price += options.embroidery.basePrice || 0;
   }
-
-  return basePrice + customizationPrice;
+  return price;
 };
 
-// Méthode pour incrémenter les vues
 productSchema.methods.incrementViews = function() {
-  return this.updateOne({ $inc: { 'analytics.views': 1 } });
+  this.analytics = this.analytics || {};
+  this.analytics.views = (this.analytics.views || 0) + 1;
 };
 
-// Méthode pour incrémenter les ajouts au panier
 productSchema.methods.incrementCartAdds = function() {
-  return this.updateOne({ $inc: { 'analytics.addedToCart': 1 } });
+  this.analytics = this.analytics || {};
+  this.analytics.addedToCart = (this.analytics.addedToCart || 0) + 1;
 };
 
-// Méthode pour incrémenter les achats
 productSchema.methods.incrementPurchases = function(quantity = 1) {
-  return this.updateOne({ $inc: { 'analytics.purchases': quantity } });
+  this.analytics = this.analytics || {};
+  this.analytics.purchases = (this.analytics.purchases || 0) + quantity;
 };
 
-// Méthode statique pour rechercher des produits
 productSchema.statics.searchProducts = function(query, options = {}) {
-  const {
-    category,
-    minPrice,
-    maxPrice,
-    inStock = true,
-    featured,
-    sortBy = 'createdAt',
-    sortOrder = -1,
-    page = 1,
-    limit = 20
-  } = options;
-
-  const searchQuery = { status: 'active' };
-
-  // Recherche textuelle
-  if (query) {
-    searchQuery.$text = { $search: query };
-  }
-
-  // Filtres
-  if (category) {
-    searchQuery.category = category;
-  }
-
-  if (minPrice || maxPrice) {
-    searchQuery['price.base'] = {};
-    if (minPrice) searchQuery['price.base'].$gte = minPrice;
-    if (maxPrice) searchQuery['price.base'].$lte = maxPrice;
-  }
-
-  if (inStock) {
-    searchQuery['variants.stock'] = { $gt: 0 };
-  }
-
-  if (featured !== undefined) {
-    searchQuery.featured = featured;
-  }
-
+  const page = Math.max(1, parseInt(options.page, 10) || 1);
+  const limit = Math.max(1, Math.min(50, parseInt(options.limit, 10) || 10));
   const skip = (page - 1) * limit;
 
-  return this.find(searchQuery)
-    .sort({ [sortBy]: sortOrder })
+  const filter = { status: 'active' };
+  if (query?.search) {
+    filter.$text = { $search: query.search };
+  }
+  if (query?.category) {
+    filter.category = query.category;
+  }
+  if (query?.gender) {
+    filter.gender = query.gender;
+  }
+
+  const sort = {};
+  const sortBy = options.sortBy || 'createdAt';
+  const sortOrder = options.sortOrder === 'asc' ? 1 : -1;
+  sort[sortBy] = sortOrder;
+
+  return this.find(filter)
+    .sort(sort)
     .skip(skip)
-    .limit(limit)
-    .populate('createdBy', 'firstName lastName')
-    .populate('lastModifiedBy', 'firstName lastName');
+    .limit(limit);
 };
 
 module.exports = mongoose.model('Product', productSchema);

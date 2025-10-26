@@ -7,21 +7,41 @@ const Order = require('../models/Order');
 const Category = require('../models/Category');
 const multer = require('multer');
 const cloudinary = require('../config/cloudinary');
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-// Multer stocke directement sur Cloudinary (compatible Vercel)
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: async (req, file) => ({
-    folder: 'customwear/products',
-    transformation: [
-      { width: 1200, height: 1200, crop: 'limit' },
-      { quality: 'auto' },
-      { fetch_format: 'auto' }
-    ]
-  })
+// Utiliser un stockage mémoire pour fiabiliser et gérer le retry Cloudinary
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 }
 });
-const upload = multer({ storage });
+
+// Options d'upload Cloudinary communes
+const CLOUDINARY_UPLOAD_OPTIONS = {
+  folder: 'customwear/products',
+  transformation: [
+    { width: 1200, height: 1200, crop: 'limit' },
+    { quality: 'auto' },
+    { fetch_format: 'auto' }
+  ]
+};
+
+// Upload avec retry exponentiel sur erreurs 5xx Cloudinary
+const uploadToCloudinaryWithRetry = async (file, options = {}, maxRetries = 2) => {
+  const dataUri = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+  let attempt = 0;
+  while (true) {
+    try {
+      return await cloudinary.uploader.upload(dataUri, options);
+    } catch (err) {
+      const msg = err?.message || '';
+      const code = err?.http_code || err?.status || 0;
+      const is5xx = (typeof code === 'number' && code >= 500 && code < 600) || /status code - 5\d{2}/.test(msg);
+      if (!is5xx || attempt >= maxRetries) throw err;
+      const delayMs = 500 * Math.pow(2, attempt);
+      await new Promise(r => setTimeout(r, delayMs));
+      attempt += 1;
+    }
+  }
+};
 
 // @desc    Obtenir les statistiques du dashboard admin
 // @route   GET /api/admin/stats
@@ -462,7 +482,8 @@ router.post('/products', authenticateToken, requireAdmin, async (req, res) => {
       materials,
       sku,
       stock,
-      status = 'active'
+      status = 'active',
+      gender
     } = req.body;
     
     // Vérification des champs requis
@@ -485,7 +506,7 @@ router.post('/products', authenticateToken, requireAdmin, async (req, res) => {
     }
     
     // Normaliser la catégorie aux valeurs autorisées par le schéma
-    const allowedCategories = ['t-shirts', 'vestes', 'casquettes', 'vaisselle'];
+    const allowedCategories = ['t-shirts', 'vestes', 'casquettes', 'bonnets', 'vaisselle'];
     let normalizedCategory = (category || '').toLowerCase();
     if (normalizedCategory === 'tshirts') normalizedCategory = 't-shirts';
     if (normalizedCategory === 'hoodies') normalizedCategory = 'vestes';
@@ -495,6 +516,16 @@ router.post('/products', authenticateToken, requireAdmin, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: `Catégorie invalide. Valeurs autorisées: ${allowedCategories.join(', ')}`
+      });
+    }
+
+    // Normaliser/valider le genre
+    const allowedGenders = ['unisexe', 'homme', 'femme', 'enfant'];
+    let normalizedGender = (gender || 'unisexe').toLowerCase();
+    if (!allowedGenders.includes(normalizedGender)) {
+      return res.status(400).json({
+        success: false,
+        message: `Genre invalide. Valeurs autorisées: ${allowedGenders.join(', ')}`
       });
     }
 
@@ -512,6 +543,7 @@ router.post('/products', authenticateToken, requireAdmin, async (req, res) => {
                 url,
                 alt: item.alt,
                 color: item.color,
+                side: (typeof item.side === 'string') ? item.side.toLowerCase() : undefined,
                 publicId: item.publicId || item.public_id,
                 isPrimary: idx === 0
               };
@@ -548,45 +580,61 @@ router.post('/products', authenticateToken, requireAdmin, async (req, res) => {
       });
     }
 
+    // Normaliser tailles et couleurs
+    const allowedSizes = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', 'Unique'];
+    const normalizeSize = (s) => {
+      const t = (s || '').toString().toUpperCase().replace(/\s+/g, '');
+      if (t === 'XXL') return '2XL';
+      if (t === 'XXXL') return '3XL';
+      return allowedSizes.includes(t) ? t : null;
+    };
+    const normalizedSizes = Array.isArray(sizes)
+      ? Array.from(new Set(sizes.map(normalizeSize).filter(Boolean)))
+      : [];
+    const normalizedColors = Array.isArray(colors)
+      ? Array.from(new Set(colors.filter(Boolean)))
+      : [];
+
     const product = new Product({
       name,
       description,
       price: mappedPrice,
       category: normalizedCategory,
+      gender: normalizedGender,
       images: mappedImages,
-      sizes: sizes || [],
-      colors: colors || [],
+      sizes: normalizedSizes,
+      colors: normalizedColors,
       materials: materials || [],
       sku: (sku || `PROD-${Date.now()}`).toUpperCase(),
       status,
       createdBy: req.user._id
     });
-    // Appliquer le stock global en tant que variante par défaut pour refléter totalStock
-    const initialStock = Number(stock);
-    if (!Number.isNaN(initialStock)) {
-      if (Array.isArray(product.variants) && product.variants.length > 0) {
-        // S'il y a des variantes, définir le stock sur la première (faute de granularité côté admin)
-        product.variants[0].stock = initialStock;
-      } else {
-        // Sinon, créer une variante par défaut "Unique" pour porter le stock
-        product.variants = [{
-          size: 'Unique',
-          color: { name: 'Standard' },
-          material: 'Default',
-          stock: initialStock
-        }];
+
+    // Générer les variantes tailles x couleurs
+    const colorsForVariants = normalizedColors.length ? normalizedColors : ['Standard'];
+    const sizesForVariants = normalizedSizes.length ? normalizedSizes : ['Unique'];
+    product.variants = [];
+    for (const sz of sizesForVariants) {
+      for (const colorName of colorsForVariants) {
+        product.variants.push({ size: sz, color: { name: colorName }, material: 'Default', stock: 0 });
       }
+    }
+
+    // Appliquer le stock global: affecter au premier variant si fourni
+    const initialStock = Number(stock);
+    if (!Number.isNaN(initialStock) && product.variants.length > 0) {
+      product.variants[0].stock = initialStock;
     }
     console.log('[ADMIN] Sauvegarde du produit en base...', {
       name: product.name,
       sku: product.sku,
       category: product.category,
-      price: product.price
+      price: product.price,
+      gender: product.gender
     });
     
     await product.save();
     console.log('[ADMIN] Produit créé avec succès:', { id: product._id, createdAt: product.createdAt });
-    // Avec catégorie en string, pas de populate nécessaire
 
     res.status(201).json({
       success: true,
@@ -608,7 +656,6 @@ router.post('/products', authenticateToken, requireAdmin, async (req, res) => {
 // @access  Private/Admin
 router.put('/products/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    // Log minimal et non sensible
     console.log('[ADMIN] PUT /products/:id', { id: req.params.id });
     const {
       name,
@@ -621,32 +668,24 @@ router.put('/products/:id', authenticateToken, requireAdmin, async (req, res) =>
       materials,
       sku,
       stock,
-      status
+      status,
+      gender
     } = req.body;
     
-    // Vérifier si le produit existe
     const product = await Product.findById(req.params.id);
     if (!product) {
       console.warn('[ADMIN] Produit non trouvé pour mise à jour:', req.params.id);
-      return res.status(404).json({
-        success: false,
-        message: 'Produit non trouvé'
-      });
+      return res.status(404).json({ success: false, message: 'Produit non trouvé' });
     }
     
-    // Vérifier si le SKU existe déjà (sauf pour le produit actuel)
     if (sku && sku !== product.sku) {
       const existingProduct = await Product.findOne({ sku, _id: { $ne: req.params.id } });
       if (existingProduct) {
         console.warn('[ADMIN] Conflit de SKU lors de la mise à jour:', { sku, id: req.params.id });
-        return res.status(400).json({
-          success: false,
-          message: 'Ce SKU existe déjà'
-        });
+        return res.status(400).json({ success: false, message: 'Ce SKU existe déjà' });
       }
     }
     
-    // Mise à jour des champs
     const updateData = {};
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
@@ -658,28 +697,26 @@ router.put('/products/:id', authenticateToken, requireAdmin, async (req, res) =>
     if (materials !== undefined) updateData.materials = materials;
     if (sku !== undefined) updateData.sku = sku;
     if (status !== undefined) updateData.status = status;
+    if (gender !== undefined) {
+      const allowedGenders = ['unisexe', 'homme', 'femme', 'enfant'];
+      const normalizedGender = (gender || '').toLowerCase();
+      if (!allowedGenders.includes(normalizedGender)) {
+        return res.status(400).json({ success: false, message: `Genre invalide. Valeurs autorisées: ${allowedGenders.join(', ')}` });
+      }
+      updateData.gender = normalizedGender;
+    }
     console.log('[ADMIN] Données de mise à jour préparées:', Object.keys(updateData));
-    // Construire l'opération d'update, en synchronisant un stock global vers les variantes
+
     const updateOps = { $set: updateData };
     if (stock !== undefined) {
       const newStock = Number(stock);
       if (!Number.isNaN(newStock)) {
         if (Array.isArray(product.variants) && product.variants.length > 0) {
-          // Mettre à jour la première variante pour refléter le stock global
-          updateOps.$set = {
-            ...updateOps.$set,
-            ['variants.0.stock']: newStock
-          };
+          updateOps.$set = { ...updateOps.$set, ['variants.0.stock']: newStock };
         } else {
-          // Créer une variante par défaut si aucune n'existe
           updateOps.$set = {
             ...updateOps.$set,
-            variants: [{
-              size: 'Unique',
-              color: { name: 'Standard' },
-              material: 'Default',
-              stock: newStock
-            }]
+            variants: [{ size: 'Unique', color: { name: 'Standard' }, material: 'Default', stock: newStock }]
           };
         }
       }
@@ -689,19 +726,12 @@ router.put('/products/:id', authenticateToken, requireAdmin, async (req, res) =>
       req.params.id,
       updateOps,
       { new: true, runValidators: true }
-    ).populate('category', 'name');
+    );
     
-    res.json({
-      success: true,
-      data: updatedProduct,
-      message: 'Produit mis à jour avec succès'
-    });
+    res.json({ success: true, data: updatedProduct, message: 'Produit mis à jour avec succès' });
   } catch (error) {
     console.error('Erreur lors de la mise à jour du produit:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur serveur lors de la mise à jour du produit'
-    });
+    res.status(500).json({ success: false, message: 'Erreur serveur lors de la mise à jour du produit' });
   }
 });
 
@@ -775,11 +805,15 @@ router.post('/uploads', authenticateToken, requireAdmin, upload.array('images', 
       });
     }
 
-    // Les fichiers sont déjà uploadés sur Cloudinary par le storage
-    const assets = files.map(file => ({
-      url: file.path,
-      public_id: file.filename || file.public_id
-    }));
+    // Uploader chaque fichier vers Cloudinary avec retry
+    const assets = [];
+    for (const file of files) {
+      const result = await uploadToCloudinaryWithRetry(file, CLOUDINARY_UPLOAD_OPTIONS, 2);
+      assets.push({
+        url: result.secure_url || result.url,
+        public_id: result.public_id
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -789,9 +823,11 @@ router.post('/uploads', authenticateToken, requireAdmin, upload.array('images', 
   } catch (error) {
     console.error('Erreur upload Cloudinary:', error?.message);
     if (error?.stack) console.error(error.stack);
-    res.status(500).json({
+    const code = error?.http_code || error?.status;
+    const is5xx = typeof code === 'number' && code >= 500 && code < 600;
+    res.status(is5xx ? 503 : 500).json({
       success: false,
-      message: 'Erreur serveur lors de l\'upload des images'
+      message: is5xx ? 'Service Cloudinary temporairement indisponible' : 'Erreur serveur lors de l\'upload des images'
     });
   }
 });

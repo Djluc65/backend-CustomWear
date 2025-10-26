@@ -31,6 +31,15 @@ router.get('/', optionalAuth, async (req, res) => {
     const inStock = req.query.inStock === 'true';
     const minRating = parseFloat(req.query.minRating) || 0;
 
+    // Nouveaux filtres
+    const rawGender = (req.query.gender || '').toString().trim();
+    const rawColor = (req.query.color || req.query.colors || '').toString().trim();
+    const rawSize = (req.query.size || req.query.sizes || '').toString().trim();
+
+    const genders = rawGender ? rawGender.split(',').map(g => g.trim().toLowerCase()).filter(Boolean) : [];
+    const colors = rawColor ? rawColor.split(',').map(c => c.trim()).filter(Boolean) : [];
+    const sizes = rawSize ? rawSize.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : [];
+
     // Construire le filtre de recherche
     const filter = {
       status: 'active'
@@ -50,6 +59,23 @@ router.get('/', optionalAuth, async (req, res) => {
     
     if (featured) {
       filter.featured = true;
+    }
+
+    if (genders.length > 0) {
+      filter.gender = { $in: genders };
+    }
+
+    // Filtre de variantes (couleurs/tailles)
+    const elemMatch = {};
+    if (colors.length > 0) {
+      // Insensibilité à la casse pour les noms de couleur
+      elemMatch['color.name'] = { $in: colors.map(c => new RegExp(`^${c}$`, 'i')) };
+    }
+    if (sizes.length > 0) {
+      elemMatch.size = { $in: sizes };
+    }
+    if (Object.keys(elemMatch).length > 0) {
+      filter.variants = { $elemMatch: elemMatch };
     }
     
     // Filtre de prix sur le prix effectif (price.sale ou price.base)
