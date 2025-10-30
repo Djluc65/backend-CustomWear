@@ -132,6 +132,9 @@ const isOriginAllowed = (origin) => {
 
 const corsOptions = {
   origin: function(origin, callback) {
+    const isDev = (process.env.NODE_ENV || 'development') === 'development';
+    // En développement, autoriser toutes les origines pour faciliter les tests multi-appareils
+    if (isDev) return callback(null, true);
     // Autoriser requêtes sans origin (mobile app, curl, etc.)
     if (!origin) return callback(null, true);
     if (isOriginAllowed(origin)) {
@@ -251,13 +254,14 @@ app.use('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 // En environnements serverless (Vercel), on exporte l'app sans démarrer un serveur
 if (process.env.VERCEL) {
   module.exports = app;
 } else {
-  app.listen(PORT, () => {
-    console.log(`🚀 Serveur CustomWear démarré sur le port ${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`🚀 Serveur CustomWear démarré sur ${HOST}:${PORT}`);
     console.log(`🌍 Environnement: ${process.env.NODE_ENV || 'development'}`);
   });
 }
